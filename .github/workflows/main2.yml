@@ -19,17 +19,28 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+      - name: Extract source ZIP
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+          mkdir -p extracted-source
+          unzip -oq WinDroid-Lite-Source-Checked.zip -d extracted-source
+          find extracted-source -name build.sh -type f
 
+      - name: Locate project directory
+        
       - name: Locate project directory
         id: project
         shell: bash
         run: |
-          if [[ -f "./build.sh" ]]; then
-            echo "dir=." >> "$GITHUB_OUTPUT"
-          elif [[ -f "./windroid/build.sh" ]]; then
-            echo "dir=windroid" >> "$GITHUB_OUTPUT"
+          if [[ -f "./extracted-source/build.sh" ]]; then
+            echo "dir=extracted-source" >> "$GITHUB_OUTPUT"
+          elif [[ -f "./extracted-source/windroid/build.sh" ]]; then
+            echo "dir=extracted-source/windroid" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::Cannot find build.sh"
+            echo "::error::build.sh not found after extracting source ZIP"
+            find extracted-source -maxdepth 5 -type f
             exit 1
           fi
 
