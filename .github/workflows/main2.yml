@@ -1,0 +1,106 @@
+
+name: Build WinDroid Lite ISO
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build WinDroid ISO
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Locate project directory
+        id: project
+        shell: bash
+        run: |
+          if [[ -f "./build.sh" ]]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [[ -f "./windroid/build.sh" ]]; then
+            echo "dir=windroid" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Cannot find build.sh"
+            exit 1
+          fi
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/lib/android \
+            /opt/hostedtoolcache/CodeQL || true
+          docker system prune -af || true
+          df -h /
+
+      - name: Build ISO in Debian container
+        id: build
+        env:
+          PROJECT_DIR: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          set -o pipefail
+
+          docker run --rm --privileged \
+            -v "$GITHUB_WORKSPACE:/repo" \
+            -w "/repo/$PROJECT_DIR" \
+            debian:trixie \
+            bash -lc '
+              set -e
+              apt-get update
+              apt-get install -y sudo ca-certificates
+              bash ./build.sh
+            ' 2>&1 | tee "$GITHUB_WORKSPACE/$PROJECT_DIR/workflow-container.log"
+
+      - name: Verify ISO and checksum
+        if: success()
+        env:
+          PROJECT_DIR: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          isos=( "$PROJECT_DIR"/windroid-lite-*.iso )
+          checksums=( "$PROJECT_DIR"/windroid-lite-*.iso.sha256 )
+
+          if (( ${#isos[@]} != 1 )); then
+            echo "::error::Expected exactly one ISO"
+            ls -lah "$PROJECT_DIR"
+            exit 1
+          fi
+
+          if (( ${#checksums[@]} != 1 )); then
+            echo "::error::Expected exactly one checksum file"
+            ls -lah "$PROJECT_DIR"
+            exit 1
+          fi
+
+          (
+            cd "$PROJECT_DIR"
+            sha256sum -c "$(basename "${checksums[0]}")"
+          )
+
+      - name: Upload ISO and build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windroid-lite-iso
+          path: |
+            ${{ steps.project.outputs.dir }}/windroid-lite-*.iso
+            ${{ steps.project.outputs.dir }}/windroid-lite-*.iso.sha256
+            ${{ steps.project.outputs.dir }}/build.log
+            ${{ steps.project.outputs.dir }}/workflow-container.log
+          if-no-files-found: warn
+          retention-days: 14
