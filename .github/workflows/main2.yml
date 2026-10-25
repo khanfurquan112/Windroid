@@ -17,8 +17,10 @@ jobs:
     timeout-minutes: 240
 
     steps:
+      
       - name: Checkout source
         uses: actions/checkout@v4
+
       - name: Extract source ZIP
         shell: bash
         run: |
@@ -29,21 +31,18 @@ jobs:
           find extracted-source -name build.sh -type f
 
       - name: Locate project directory
-        
-      - name: Locate project directory
         id: project
         shell: bash
         run: |
-          if [[ -f "./extracted-source/build.sh" ]]; then
-            echo "dir=extracted-source" >> "$GITHUB_OUTPUT"
-          elif [[ -f "./extracted-source/windroid/build.sh" ]]; then
-            echo "dir=extracted-source/windroid" >> "$GITHUB_OUTPUT"
-          else
+          BUILD_SCRIPT="$(find extracted-source -type f -name build.sh -print -quit)"
+          if [[ -z "$BUILD_SCRIPT" ]]; then
             echo "::error::build.sh not found after extracting source ZIP"
             find extracted-source -maxdepth 5 -type f
             exit 1
           fi
-
+          PROJECT_DIR="${BUILD_SCRIPT%/build.sh}"
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          
       - name: Free disk space
         shell: bash
         run: |
