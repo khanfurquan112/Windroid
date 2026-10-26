@@ -1,0 +1,72 @@
+# =====================================================================
+#  Build WinDroid Lite ISO on GitHub (no Linux machine needed)
+#
+#  How it works: the repository contains ONE file, windroid-lite-build-kit.zip.
+#  This workflow unpacks it and builds the ISO inside a Debian 13 container.
+#  It starts automatically on every push (for example when you upload a new zip)
+#  and can also be started by hand: Actions -> Build WinDroid Lite ISO -> Run workflow.
+#  When it finishes (about 25-60 minutes) download the ISO from "Artifacts" on the run page.
+# =====================================================================
+name: Build WinDroid Lite ISO
+
+on:
+  push:
+  workflow_dispatch:
+
+# a newer push cancels an older, still-running build (no duplicate builds, no confusing red marks)
+concurrency:
+  group: windroid-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # pinned on purpose: "ubuntu-latest" is moving to a newer Ubuntu and could change under us
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Unpack the build kit
+        run: |
+          set -e
+          test -f windroid-lite-build-kit.zip || { echo "::error::windroid-lite-build-kit.zip is missing in the repository root"; exit 1; }
+          unzip -o -q windroid-lite-build-kit.zip
+          test -f windroid/build.sh || { echo "::error::the zip must contain the folder 'windroid/' with build.sh inside"; exit 1; }
+          ls -la windroid
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          docker image prune --all --force || true
+          df -h /
+
+      - name: Build the ISO (inside a Debian 13 container, one automatic retry)
+        run: |
+          cd windroid
+          docker run --rm --privileged -v "$PWD":/work -w /work debian:trixie \
+            bash -c 'apt-get update && apt-get install -y sudo && { bash ./build.sh || { echo "== first attempt failed, retrying once =="; bash ./build.sh; }; }'
+
+      - name: Show the end of the build log (only when the build failed)
+        if: failure()
+        run: |
+          echo "=== last 120 lines of build.log ==="
+          tail -n 120 windroid/build.log || true
+
+      - name: Show the result
+        if: success()
+        run: ls -lh windroid/windroid-lite-*.iso*
+
+      - name: Upload the ISO and the log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windroid-lite-iso
+          path: |
+            windroid/windroid-lite-*.iso
+            windroid/windroid-lite-*.iso.sha256
+            windroid/build.log
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: warn
